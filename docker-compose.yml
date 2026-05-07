@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  frontend:
+    build: .
+    container_name: gps-vivo-frontend
+    ports:
+      - "80:80"
+    restart: always
+
+# Más adelante podemos agregar aquí el vps-bot
+#  vps-bot:
+#    build: ./vps-bot
+#    container_name: vps-bot-gps
+#    restart: unless-stopped
+#    env_file:
+#      - ./vps-bot/.env
