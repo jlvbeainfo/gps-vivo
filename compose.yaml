@@ -1,16 +1,17 @@
-## Add your compose file here
+version: '3.8'
+
 services:
-  hello_world:
-    image: hello-world
-    # networks:
-    #   - default
-    # ports:
-    #   - 3000:3000
-    # volumes:
-    #   - data:/data
+  frontend:
+    build: .
+    container_name: gps-vivo-frontend
+    ports:
+      - "3000:80"
+    restart: always
 
-# networks:
-#   default: {}
-
-# volumes:
-#   data:
+# Más adelante podemos agregar aquí el vps-bot
+#  vps-bot:
+#    build: ./vps-bot
+#    container_name: vps-bot-gps
+#    restart: unless-stopped
+#    env_file:
+#      - ./vps-bot/.env
