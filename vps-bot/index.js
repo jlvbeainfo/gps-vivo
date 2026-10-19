@@ -110,6 +110,8 @@ const emojis = {
 
 // Memoria de dónde estaba cada dispositivo
 const state = {};
+// Memoria para evitar alertas falsas (Anti-rebote de GPS)
+const pendingExits = {};
 
 async function sendTelegramMessage(text) {
     try {
@@ -126,7 +128,18 @@ async function sendTelegramMessage(text) {
 async function checkLocations() {
     try {
         const res = await axios.get(API_URL);
-        const data = res.data;
+        const rawData = res.data;
+        const now = Date.now();
+
+        // Limpiar duplicados de la API: Si hay varios registros para el mismo "topic" (ej. app vieja y app nueva),
+        // nos quedamos SOLO con el que tenga el timestamp (tst) más reciente.
+        const dispositivosMasRecientes = {};
+        for (const d of rawData) {
+            if (!dispositivosMasRecientes[d.topic] || d.tst > dispositivosMasRecientes[d.topic].tst) {
+                dispositivosMasRecientes[d.topic] = d;
+            }
+        }
+        const data = Object.values(dispositivosMasRecientes);
 
         for (const disp of data) {
             const id = disp.topic;
@@ -134,7 +147,11 @@ async function checkLocations() {
             const emoji = emojis[nombre] || "📱";
             const currentZones = [];
 
-            // Comprobar en qué zonas está actualmente
+            // Inicializar memorias para nuevos dispositivos
+            if (!state[id]) state[id] = [];
+            if (!pendingExits[id]) pendingExits[id] = {};
+
+            // Comprobar en qué zonas está físicamente ahora mismo según el GPS
             for (const zona of ZONAS) {
                 if (zona.tipo === 'poligono') {
                     if (isPointInPolygon([disp.lat, disp.lon], zona.coordenadas)) {
@@ -148,27 +165,39 @@ async function checkLocations() {
                 }
             }
 
-            if (!state[id]) {
-                state[id] = [];
-            }
-            const previousZones = state[id];
-
-            // Detectar entradas
+            // 1. Detectar Entradas (Si entra, cancelamos cualquier "salida falsa" pendiente y avisamos)
             for (const z of currentZones) {
-                if (!previousZones.includes(z)) {
+                // Si el GPS lo detectó adentro, ya no está saliendo
+                if (pendingExits[id][z]) {
+                    delete pendingExits[id][z];
+                }
+                
+                // Si no estaba registrado adentro, acaba de entrar
+                if (!state[id].includes(z)) {
+                    state[id].push(z);
                     await sendTelegramMessage(`📍 ${emoji} ${nombre} ha entrado a: ${z}`);
                 }
             }
 
-            // Detectar salidas
-            for (const z of previousZones) {
+            // 2. Detectar Salidas (Con retraso de 3 minutos para evitar rebotes de GPS)
+            for (let i = state[id].length - 1; i >= 0; i--) {
+                const z = state[id][i];
+                
+                // Si estaba en la zona pero el GPS actual dice que no está
                 if (!currentZones.includes(z)) {
-                    await sendTelegramMessage(`👋 ${emoji} ${nombre} ha salido de: ${z}`);
+                    // Si es la primera vez que no lo vemos, iniciamos el cronómetro
+                    if (!pendingExits[id][z]) {
+                        pendingExits[id][z] = now;
+                    } 
+                    // Si ya pasó 1 minuto (60,000 milisegundos) desde que "salió"
+                    else if (now - pendingExits[id][z] > 60000) {
+                        // Confirmamos la salida real
+                        state[id].splice(i, 1);
+                        delete pendingExits[id][z];
+                        await sendTelegramMessage(`👋 ${emoji} ${nombre} ha salido de: ${z}`);
+                    }
                 }
             }
-
-            // Actualizar memoria
-            state[id] = currentZones;
         }
     } catch (err) {
         console.error("[Error API]", err.message);
